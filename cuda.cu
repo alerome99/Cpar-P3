@@ -542,6 +542,7 @@ int main(int argc, char *argv[]) {
 	cudaMalloc((void **) &newCellsDevice, sizeof(Cell) * (size_t)num_cells); //cells new cells
 	cudaMalloc((void **) &cellsDevice2, sizeof(Cell) * (size_t)num_cells); //cells salida
 
+	cudaMemcpy( cellsDevice2, cells2, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
 
 	/*cudaMemcpy( pDevice, culture, sizeof(int) * (size_t)rows * (size_t)columns ,cudaMemcpyHostToDevice );
 
@@ -788,9 +789,10 @@ int main(int argc, char *argv[]) {
 
 		aliveList[0] = alive_in_main_list;
 		posi[0] = free_position;
-		//cudaMemcpy( cellsDevice, cells, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
-		cudaMemcpy( cellsDevice2, cells2, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
+
 		cudaMemcpy( aDevice, aliveList, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
+		//cudaMemcpy( cellsDevice, cells, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
+
 		cudaMemcpy( posiDevice, posi, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
 		/*
 		int p = 0;
@@ -948,7 +950,7 @@ int main(int argc, char *argv[]) {
 		cudaMemcpy( culture, pDevice, sizeof(int) * rows * columns ,cudaMemcpyDeviceToHost );
 		cudaMemcpy( maxFoodTemp, cDevice, sizeof(int) * 1 * 1 ,cudaMemcpyDeviceToHost );
 
-		current_max_food = maxFoodTemp[0];
+		current_max_food = maxFoodTemp[0]; //La primera variable resultado
 
 		/* 4.8. Decrease non-harvested food */
 		/*
