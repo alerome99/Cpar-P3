@@ -763,7 +763,7 @@ int main(int argc, char *argv[]) {
 		
 		comerComida<<<numeroBloq, tamanoBloq, sizeof(int)*tamanoBloq>>>(pDevice, cellsDevice, num_cells, rows, columns);
 
-		cudaMemcpy( cells, cellsDevice, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
+		//cudaMemcpy( cells, cellsDevice, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
 		cudaMemcpy( culture, pDevice, sizeof(int) * rows * columns ,cudaMemcpyDeviceToHost );
 		/*if(iter == 1){
 			for(i=0; i<rows*columns; i++){
@@ -788,7 +788,7 @@ int main(int argc, char *argv[]) {
 
 		aliveList[0] = alive_in_main_list;
 		posi[0] = free_position;
-		cudaMemcpy( cellsDevice, cells, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
+		//cudaMemcpy( cellsDevice, cells, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
 		cudaMemcpy( cellsDevice2, cells2, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
 		cudaMemcpy( aDevice, aliveList, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
 		cudaMemcpy( posiDevice, posi, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
