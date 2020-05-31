@@ -213,15 +213,14 @@ __global__ void comerComida(int* array, Cell* cells, int size, int rows, int col
 	}
 }
 
-__global__ void limpiarCelulas(Cell* cells2, int size, int* alive, int* posi, Cell* cellsSal)
+__global__ void limpiarCelulas(Cell* cells2, int size, int* alive, Cell* cellsSal)
 {	
 	int pos = 0;
 	int globalPos = threadIdx.x + blockIdx.x * blockDim.x;
 	if ( globalPos < size ) {
 		if ( cells2[globalPos].alive ) {
-			atomicAdd(alive,1);
-			pos = atomicAdd(posi,1);
-				cellsSal[pos] = cells2[globalPos];
+			pos = atomicAdd(alive,1);
+			cellsSal[pos] = cells2[globalPos];
 		}
 	}
 }
@@ -251,6 +250,165 @@ __global__ void anyadirCelulas2(Cell* cellsEntrada, int stepNewCells, int numCel
 		//printf("esta es la salida %i en la posicion %i\n",cellsSalida[numCells + globalPos].age, numCells + globalPos);
 	}	
 }
+
+//crear una funcion global que inicialice en cada iteracion los valores que tengan que ser nuevamente 0, por ejemplo aDevice, stepDeadCellsDevice ... 
+__global__ void movimientoCelulas(Cell* cellsEntrada, int rows, int columns, int* aliveDevice, int* stepDeadCellsDevice, int* historyMaxAge, int numCells)
+{	
+	int globalPos = threadIdx.x + blockIdx.x * blockDim.x;
+	if(globalPos < numCells){
+		if ( cellsEntrada[globalPos].alive ) {
+			cellsEntrada[globalPos].age ++;
+			if ( cellsEntrada[globalPos].age > historyMaxAge[0] ) historyMaxAge[0] = cellsEntrada[globalPos].age; //pasar history_max_age
+			if ( cellsEntrada[globalPos].storage < ENERGY_NEEDED_TO_LIVE ) {
+				cellsEntrada[globalPos].alive = false;
+				atomicSub(aliveDevice,1);
+				atomicAdd(stepDeadCellsDevice,1);
+			}
+			if ( cellsEntrada[globalPos].alive ) {
+				if ( cellsEntrada[globalPos].storage < ENERGY_NEEDED_TO_MOVE ) {
+					cellsEntrada[globalPos].storage -= ENERGY_SPENT_TO_LIVE;
+				}
+				else {
+					cellsEntrada[globalPos].storage -= ENERGY_SPENT_TO_MOVE;
+							
+					int prob = int_urand48( PRECISION, cellsEntrada[globalPos].random_seq );
+					if ( prob < cellsEntrada[globalPos].choose_mov[0] ) {
+						int tmp = cellsEntrada[globalPos].mov_col;
+						cellsEntrada[globalPos].mov_col = cellsEntrada[globalPos].mov_row;
+						cellsEntrada[globalPos].mov_row = -tmp;
+					}
+					else if ( prob >= cellsEntrada[globalPos].choose_mov[0] + cellsEntrada[globalPos].choose_mov[1] ) {
+						int tmp = cellsEntrada[globalPos].mov_row;
+						cellsEntrada[globalPos].mov_row = cellsEntrada[globalPos].mov_col;
+						cellsEntrada[globalPos].mov_col = -tmp;
+					}
+						
+					cellsEntrada[globalPos].pos_row += cellsEntrada[globalPos].mov_row;
+					cellsEntrada[globalPos].pos_col += cellsEntrada[globalPos].mov_col;
+
+					if ( cellsEntrada[globalPos].pos_row < 0 ) cellsEntrada[globalPos].pos_row += rows * PRECISION;
+					if ( cellsEntrada[globalPos].pos_row >= rows * PRECISION) cellsEntrada[globalPos].pos_row -= rows * PRECISION;
+					if ( cellsEntrada[globalPos].pos_col < 0 ) cellsEntrada[globalPos].pos_col += columns * PRECISION;
+					if ( cellsEntrada[globalPos].pos_col >= columns * PRECISION) cellsEntrada[globalPos].pos_col -= columns * PRECISION;
+				}
+			}
+		}
+	}
+}
+
+__global__ void movimientoCelulas2(Cell* cellsEntrada, int* arrayCul, int* arrayCulCells, int* foodShareDevice, int numCells, int columns)
+{
+	int globalPos = threadIdx.x + blockIdx.x * blockDim.x;
+	if(globalPos < numCells){
+		if(cellsEntrada[globalPos].alive){
+			int posicion = (cellsEntrada[globalPos].pos_row / PRECISION) * columns + (cellsEntrada[globalPos].pos_col / PRECISION);
+			atomicAdd(&arrayCulCells[posicion],1);
+			foodShareDevice[globalPos] = arrayCul[posicion];
+		}
+	}
+}
+
+
+/*
+__global__ void nacimientoCelulas(Cell* cellsEntrada, int* arrayCulCells, int* arrayCul, int* foodShareDevice, Cell* newCellsDevice, int* aliveDevice, int* stepNewCellsDevice, 
+	int* historyTotalCellsDevice, int numCells, int columns)
+{
+	int pos = 0;
+	int globalPos = threadIdx.x + blockIdx.x * blockDim.x;
+	if(globalPos < numCells){
+		if(cellsEntrada[globalPos].alive){
+			int food = foodShareDevice[globalPos];
+			int count = accessMat( arrayCul, cellsEntrada[globalPos].pos_row / PRECISION, cellsEntrada[globalPos].pos_col / PRECISION );
+			int my_food = food / count;
+			cellsEntrada[globalPos].storage += my_food;
+
+			if ( cellsEntrada[globalPos].age > 30 && cellsEntrada[globalPos].storage > ENERGY_NEEDED_TO_SPLIT ) {
+					// Split: Create new cell
+				atomicAdd(aliveDevice,1);
+				pos = atomicAdd(stepNewCellsDevice,1);	//faltaaaaaaaaaaaaaaaaaa
+				atomicAdd(historyTotalCellsDevice,1);		//faltaaaaaaaaaaaaaaa
+					//num_cells_alive ++;
+					//sim_stat.history_total_cells ++;
+					//step_new_cells ++;
+
+					// New cell is a copy of parent cell
+				newCellsDevice[ pos-1 ] = cellsEntrada[globalPos];
+
+					// Split energy stored and update age in both cells
+				cellsEntrada[globalPos].storage /= 2;
+				newCellsDevice[ pos-1 ].storage /= 2;
+				cellsEntrada[globalPos].age = 1;
+				newCellsDevice[ pos-1 ].age = 1;
+
+					// Random seed for the new cell, obtained using the parent random sequence
+				newCellsDevice[ pos-1 ].random_seq[0] = (unsigned short)glibc_nrand48( cellsEntrada[globalPos].random_seq );
+				newCellsDevice[ pos-1 ].random_seq[1] = (unsigned short)glibc_nrand48( cellsEntrada[globalPos].random_seq );
+				newCellsDevice[ pos-1 ].random_seq[2] = (unsigned short)glibc_nrand48( cellsEntrada[globalPos].random_seq );
+				// Both cells start in random directions
+					float angle = (float)(2 * M_PI * int_urand48( INT_2PI, cellsEntrada[globalPos].random_seq ));
+					cellsEntrada[globalPos].mov_row = sinf( angle );
+					cellsEntrada[globalPos].mov_col = cosf( angle );
+					angle = (float)(2 * M_PI * int_urand48( INT_2PI, newCellsDevice[ pos-1 ].random_seq ));
+					newCellsDevice[ pos-1 ].mov_row = sinf( angle );
+					newCellsDevice[ pos-1 ].mov_col = cosf( angle );
+
+					int mutation_type = (int)(4 * int_urand48( INT_2PI, cellsEntrada[globalPos].random_seq ));
+					float mutation_percentage = (float)(0.5 * int_urand48( INT_2PI, cellsEntrada[globalPos].random_seq ));
+					float mutation_value;
+					switch( mutation_type ) {
+						case 0:
+							mutation_value = intfloatMult(cellsEntrada[globalPos].choose_mov[1] , mutation_percentage);
+							cellsEntrada[globalPos].choose_mov[1] -= mutation_value;
+							cellsEntrada[globalPos].choose_mov[0] += mutation_value;
+							break;
+						case 1:
+							mutation_value = intfloatMult(cellsEntrada[globalPos].choose_mov[0] , mutation_percentage);
+							cellsEntrada[globalPos].choose_mov[0] -= mutation_value;
+							cellsEntrada[globalPos].choose_mov[1] += mutation_value;
+							break;
+						case 2:
+							mutation_value = intfloatMult(cellsEntrada[globalPos].choose_mov[2] , mutation_percentage);
+							cellsEntrada[globalPos].choose_mov[2] -= mutation_value;
+							cellsEntrada[globalPos].choose_mov[1] += mutation_value;
+							break;
+						case 3:
+							mutation_value = intfloatMult(cellsEntrada[globalPos].choose_mov[1] , mutation_percentage);
+							cellsEntrada[globalPos].choose_mov[1] -= mutation_value;
+							cellsEntrada[globalPos].choose_mov[2] += mutation_value;
+							break;
+					}
+					cellsEntrada[globalPos].choose_mov[2] = 1.0f - cellsEntrada[globalPos].choose_mov[1] - cellsEntrada[globalPos].choose_mov[0];
+
+					mutation_type = (int)(4 * int_urand48( INT_2PI, newCellsDevice[ pos-1 ].random_seq ));
+					mutation_percentage = (float)(0.5 * int_urand48( INT_2PI, newCellsDevice[ pos-1 ].random_seq ));
+					switch( mutation_type ) {
+						case 0:
+							mutation_value = intfloatMult(newCellsDevice[ pos-1 ].choose_mov[1] , mutation_percentage);
+							newCellsDevice[ pos-1 ].choose_mov[1] -= mutation_value;
+							newCellsDevice[ pos-1 ].choose_mov[0] += mutation_value;
+							break;
+						case 1:
+							mutation_value = intfloatMult(newCellsDevice[ pos-1 ].choose_mov[0] , mutation_percentage);
+							newCellsDevice[ pos-1 ].choose_mov[0] -= mutation_value;
+							newCellsDevice[ pos-1 ].choose_mov[1] += mutation_value;
+							break;
+						case 2:
+							mutation_value = intfloatMult(newCellsDevice[ pos-1 ].choose_mov[2] , mutation_percentage);
+							newCellsDevice[ pos-1 ].choose_mov[2] -= mutation_value;
+							newCellsDevice[ pos-1 ].choose_mov[1] += mutation_value;
+							break;
+						case 3:
+							mutation_value = intfloatMult(newCellsDevice[ pos-1 ].choose_mov[1] , mutation_percentage);
+							newCellsDevice[ pos-1 ].choose_mov[1] -= mutation_value;
+							newCellsDevice[ pos-1 ].choose_mov[2] += mutation_value;
+							break;
+					}
+					newCellsDevice[ pos-1 ].choose_mov[2] = 1.0f - newCellsDevice[ pos-1 ].choose_mov[1] - newCellsDevice[ pos-1 ].choose_mov[0];
+			}
+		}
+	} // End cell actions
+}
+*/
 
 /*
 __global__ void limpiarCelulas(Cell* cells, int size, int* alive2, int* posi)
@@ -513,11 +671,21 @@ int main(int argc, char *argv[]) {
 	/* 3. Initialize culture surface and initial cells */
 	int *maxFoodTemp;
 	int *aliveList;
-	int *posi;
+	int *stepDeadCells;
+	int *stepNewCells;
+	int *numAlive;
+	int *foodShare;
+	int *historyMaxAge;
+	int *historyTotalCells;
 
 	maxFoodTemp = (int *)malloc( sizeof(int) * (size_t)1 * (size_t)1 );
+	historyMaxAge = (int *)malloc( sizeof(int) * (size_t)1 * (size_t)1 );
+	historyTotalCells = (int *)malloc( sizeof(int) * (size_t)1 * (size_t)1 );
+	numAlive = (int *)malloc( sizeof(int) * (size_t)1 * (size_t)1 );
+	stepDeadCells = (int *)malloc( sizeof(int) * (size_t)1 * (size_t)1 );
+	stepNewCells = (int *)malloc( sizeof(int) * (size_t)1 * (size_t)1 );
+	foodShare = (int *)malloc( sizeof(int) * (size_t)1 * (size_t)1 );
 	aliveList = (int *)malloc( sizeof(int) * (size_t)1 * (size_t)1 );
-	posi = (int *)malloc( sizeof(int) * (size_t)1 * (size_t)1 );
 	culture = (int *)malloc( sizeof(int) * (size_t)rows * (size_t)columns );
 	culture_cells = (int *)malloc( sizeof(int) * (size_t)rows * (size_t)columns );
 	if ( culture == NULL || culture_cells == NULL ) {
@@ -532,12 +700,24 @@ int main(int argc, char *argv[]) {
 	Cell* cellsDevice2;
 	Cell* cellsDevice3;
 	int* aDevice;
-	int* posiDevice;
+	int* foodShareDevice;
+	int* numAliveDevice;
+	int* stepDeadCellsDevice;
+	int* stepNewCellsDevice;
+	int* historyMaxAgeDevice;
+	int* historyTotalCellsDevice;
+
+	//no hay realloc hacer cudaFree y despues cudaMalloc
+	cudaMalloc((void **) &foodShareDevice, sizeof(int) * (size_t)num_cells); //max_food
+	cudaMalloc((void **) &numAliveDevice, sizeof(int) * (size_t)1 * (size_t)1); //max_food
+	cudaMalloc((void **) &historyMaxAgeDevice, sizeof(int) * (size_t)1 * (size_t)1); //max_food
+	cudaMalloc((void **) &historyTotalCellsDevice, sizeof(int) * (size_t)1 * (size_t)1); //max_food
+	cudaMalloc((void **) &stepDeadCellsDevice, sizeof(int) * (size_t)1 * (size_t)1); //max_food
+	cudaMalloc((void **) &stepNewCellsDevice, sizeof(int) * (size_t)1 * (size_t)1); //max_food
 	cudaMalloc((void **) &pDevice, sizeof(int) * (size_t)rows * (size_t)columns); //culture
 	cudaMalloc((void **) &p2Device, sizeof(int) * (size_t)rows * (size_t)columns); //culture_cells
 	cudaMalloc((void **) &cDevice, sizeof(int) * (size_t)1 * (size_t)1); //max_food
 	cudaMalloc((void **) &aDevice, sizeof(int) * (size_t)1 * (size_t)1); //alive
-	cudaMalloc((void **) &posiDevice, sizeof(int) * (size_t)1 * (size_t)1); //posi
 	cudaMalloc((void **) &cellsDevice, sizeof(Cell) * (size_t)num_cells); //cells entrada
 	cudaMalloc((void **) &newCellsDevice, sizeof(Cell) * (size_t)num_cells); //cells new cells
 	cudaMalloc((void **) &cellsDevice2, sizeof(Cell) * (size_t)num_cells); //cells salida
@@ -648,8 +828,56 @@ int main(int argc, char *argv[]) {
 			fprintf(stderr,"-- Error allocating food_to_share structures for size: %d x %d \n", rows, columns );
 			exit( EXIT_FAILURE );
 		}
+		stepDeadCells[0] = 0;
+		numAlive[0] = num_cells_alive;
+		historyMaxAge[0] = sim_stat.history_max_age;
 
+		cudaMemcpy( pDevice, culture, sizeof(int) * rows * columns ,cudaMemcpyHostToDevice );
+		cudaMemcpy( p2Device, culture_cells, sizeof(int) * rows * columns ,cudaMemcpyHostToDevice );
+		cudaMemcpy( cellsDevice, cells, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
+		cudaMemcpy( foodShareDevice, food_to_share, sizeof(int) * num_cells ,cudaMemcpyHostToDevice );
+		cudaMemcpy( numAliveDevice, numAlive, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
+		cudaMemcpy( stepDeadCellsDevice, stepDeadCells, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
+		cudaMemcpy( historyMaxAgeDevice, historyMaxAge, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
+		
+		movimientoCelulas<<<numeroBloq, tamanoBloq, sizeof(int)*tamanoBloq>>>(cellsDevice, rows, columns, numAliveDevice, stepDeadCellsDevice, historyMaxAgeDevice, num_cells);
+
+
+		cudaMemcpy( numAlive, numAliveDevice, sizeof(int) * 1 * 1 ,cudaMemcpyDeviceToHost );
+		cudaMemcpy( stepDeadCells, stepDeadCellsDevice, sizeof(int) * 1 * 1 ,cudaMemcpyDeviceToHost );
+		cudaMemcpy( historyMaxAge, historyMaxAgeDevice, sizeof(int) * 1 * 1 ,cudaMemcpyDeviceToHost );
+		//cudaMemcpy( cells, cellsDevice, sizeof(Cell) * num_cells ,cudaMemcpyDeviceToHost );
+
+		movimientoCelulas2<<<numeroBloq, tamanoBloq, sizeof(int)*tamanoBloq>>>(cellsDevice, pDevice, p2Device, foodShareDevice, num_cells, columns);
+
+		cudaMemcpy( cells, cellsDevice, sizeof(Cell) * num_cells ,cudaMemcpyDeviceToHost );
+		cudaMemcpy( culture, pDevice, sizeof(int) * rows * columns ,cudaMemcpyDeviceToHost );
+		cudaMemcpy( culture_cells, p2Device, sizeof(int) * rows * columns ,cudaMemcpyDeviceToHost );
+		cudaMemcpy( food_to_share, foodShareDevice, sizeof(int) * num_cells ,cudaMemcpyDeviceToHost );
+
+
+		/*	
+		int s = 0;
+		int a = 0;
+		for(i=0; i<num_cells; i++){
+			s += food_to_share[i];
+			a += accessMat( culture_cells, cells[i].pos_row / PRECISION, cells[i].pos_col / PRECISION );
+		}
+		printf("suma del food to share %i y la suma de posiciones %i en la iteracion %i\n", s, a, iter);*/
+		
+		sim_stat.history_max_age = historyMaxAge[0];
+		num_cells_alive = numAlive[0];
+		step_dead_cells = stepDeadCells[0];
+
+		/*
+		for (i=0; i<num_cells; i++) {
+			if(cells[i].alive){
+				accessMat( culture_cells, cells[i].pos_row / PRECISION, cells[i].pos_col / PRECISION ) += 1;
+				food_to_share[i] = accessMat( culture, cells[i].pos_row / PRECISION, cells[i].pos_col / PRECISION );
+			}
+		}*/
 		/* 4.3. Cell movements */
+		/*
 		for (i=0; i<num_cells; i++) {
 			if ( cells[i].alive ) {
 				cells[i].age ++;
@@ -657,7 +885,7 @@ int main(int argc, char *argv[]) {
 				if ( cells[i].age > sim_stat.history_max_age ) sim_stat.history_max_age = cells[i].age;
 
 				/* 4.3.1. Check if the cell has the needed energy to move or keep alive */
-				if ( cells[i].storage < ENERGY_NEEDED_TO_LIVE ) {
+				/*if ( cells[i].storage < ENERGY_NEEDED_TO_LIVE ) {
 					// Cell has died
 					cells[i].alive = false;
 					num_cells_alive --;
@@ -673,7 +901,7 @@ int main(int argc, char *argv[]) {
 					cells[i].storage -= ENERGY_SPENT_TO_MOVE;
 						
 					/* 4.3.2. Choose movement direction */
-					int prob = int_urand48( PRECISION, cells[i].random_seq );
+					/*int prob = int_urand48( PRECISION, cells[i].random_seq );
 					if ( prob < cells[i].choose_mov[0] ) {
 						// Turn left (90 degrees)
 						int tmp = cells[i].mov_col;
@@ -689,7 +917,7 @@ int main(int argc, char *argv[]) {
 					// else do not change the direction
 					
 					/* 4.3.3. Update position moving in the choosen direction*/
-					cells[i].pos_row += cells[i].mov_row;
+					/*cells[i].pos_row += cells[i].mov_row;
 					cells[i].pos_col += cells[i].mov_col;
 					// Periodic arena: Left/Rigth edges are connected, Top/Bottom edges are connected
 					if ( cells[i].pos_row < 0 ) cells[i].pos_row += rows * PRECISION;
@@ -699,11 +927,11 @@ int main(int argc, char *argv[]) {
 				}
 
 				/* 4.3.4. Annotate that there is one more cell in this culture position */
-				accessMat( culture_cells, cells[i].pos_row / PRECISION, cells[i].pos_col / PRECISION ) += 1;
+				//accessMat( culture_cells, cells[i].pos_row / PRECISION, cells[i].pos_col / PRECISION ) += 1;
 				/* 4.3.5. Annotate the amount of food to be shared in this culture position */
-				food_to_share[i] = accessMat( culture, cells[i].pos_row / PRECISION, cells[i].pos_col / PRECISION );
-			}
-		} // End cell movements
+				//food_to_share[i] = accessMat( culture, cells[i].pos_row / PRECISION, cells[i].pos_col / PRECISION );
+			//}
+		//} // End cell movements
 		
 		/* 4.4. Cell actions */
 		// Space for the list of new cells (maximum number of new cells is num_cells)
@@ -713,15 +941,48 @@ int main(int argc, char *argv[]) {
 			exit( EXIT_FAILURE );
 		}
 
+		/*
+		stepNewCells[0] = 0;
+		historyTotalCells[0] = sim_stat.history_total_cells;
+
+		cudaMemcpy( newCellsDevice, new_cells, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice);
+		cudaMemcpy( pDevice, culture, sizeof(int) * rows * columns ,cudaMemcpyHostToDevice );
+		cudaMemcpy( p2Device, culture_cells, sizeof(int) * rows * columns ,cudaMemcpyHostToDevice );
+		cudaMemcpy( cellsDevice, cells, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
+		cudaMemcpy( foodShareDevice, food_to_share, sizeof(int) * num_cells ,cudaMemcpyHostToDevice );
+		cudaMemcpy( numAliveDevice, numAlive, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
+		cudaMemcpy( stepNewCellsDevice, stepNewCells, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
+		cudaMemcpy( historyTotalCellsDevice, historyTotalCells, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
+
+		nacimientoCelulas<<<numeroBloq, tamanoBloq, sizeof(int)*tamanoBloq>>>(cellsDevice, p2Device, pDevice, foodShareDevice, newCellsDevice, numAliveDevice,
+			stepNewCellsDevice, historyTotalCellsDevice, num_cells, columns);
+
+		cudaMemcpy( new_cells, newCellsDevice, sizeof(Cell) * num_cells ,cudaMemcpyDeviceToHost );	
+		cudaMemcpy( culture, pDevice, sizeof(int) * rows * columns ,cudaMemcpyDeviceToHost );
+		cudaMemcpy( culture_cells, p2Device, sizeof(int) * rows * columns ,cudaMemcpyDeviceToHost );
+		cudaMemcpy( cells, cellsDevice, sizeof(Cell) * num_cells ,cudaMemcpyDeviceToHost );		
+		cudaMemcpy( numAlive, numAliveDevice, sizeof(int) * 1 * 1 ,cudaMemcpyDeviceToHost );
+		cudaMemcpy( stepNewCells, stepNewCellsDevice, sizeof(int) * 1 * 1 ,cudaMemcpyDeviceToHost );
+		cudaMemcpy( historyTotalCells, historyTotalCellsDevice, sizeof(int) * 1 * 1 ,cudaMemcpyDeviceToHost );
+
+
+		sim_stat.history_total_cells = historyTotalCells[0];
+		num_cells_alive = numAlive[0];
+		step_new_cells = stepNewCells[0];
+		*/
+
+		
 		for (i=0; i<num_cells; i++) {
 			if ( cells[i].alive ) {
 				/* 4.4.1. Food harvesting */
+			
 				int food = food_to_share[i];
 				int count = accessMat( culture_cells, cells[i].pos_row / PRECISION, cells[i].pos_col / PRECISION );
 				int my_food = food / count;
 				cells[i].storage += my_food;
 
 				/* 4.4.2. Split cell if the conditions are met: Enough maturity and energy */
+		
 				if ( cells[i].age > 30 && cells[i].storage > ENERGY_NEEDED_TO_SPLIT ) {
 					// Split: Create new cell
 					num_cells_alive ++;
@@ -784,16 +1045,13 @@ int main(int argc, char *argv[]) {
 
 		/* 4.6. Clean dead cells from the original list */
 		// 4.6.1. Move alive cells to the left to substitute dead cells
-		int free_position = 0;
 		int alive_in_main_list = 0;
 
 		aliveList[0] = alive_in_main_list;
-		posi[0] = free_position;
 
 		cudaMemcpy( aDevice, aliveList, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
 		//cudaMemcpy( cellsDevice, cells, sizeof(Cell) * num_cells ,cudaMemcpyHostToDevice );
 
-		cudaMemcpy( posiDevice, posi, sizeof(int) * 1 * 1 ,cudaMemcpyHostToDevice );
 		/*
 		int p = 0;
 		for(int k = 0; k<num_cells; k++){
@@ -804,11 +1062,10 @@ int main(int argc, char *argv[]) {
 		if(iter==10){
 			printf("numero de celulas vivas %i   en la iteracion %i  numero de celulas  %i\n", p, iter, num_cells);
 		}*/
-		limpiarCelulas<<<numeroBloq, tamanoBloq, sizeof(int)*tamanoBloq>>>(cellsDevice, num_cells, aDevice, posiDevice, cellsDevice2);
+		limpiarCelulas<<<numeroBloq, tamanoBloq, sizeof(int)*tamanoBloq>>>(cellsDevice, num_cells, aDevice, cellsDevice2);
 
 		limpiarCelulas2<<<numeroBloq, tamanoBloq, sizeof(int)*tamanoBloq>>>(cellsDevice2, aDevice, cellsDevice);
 		//si seguimos la explicacion de abajo, aqui habria que combinar cellsDevice2 y cellsDevice con limpiarCelulas2
-		cudaMemcpy( posi, posiDevice, sizeof(int) * 1 * 1 ,cudaMemcpyDeviceToHost );
 		//cudaMemcpy( cells2, cellsDevice2, sizeof(Cell) * num_cells ,cudaMemcpyDeviceToHost );
 		cudaMemcpy( aliveList, aDevice, sizeof(int) * 1 * 1 ,cudaMemcpyDeviceToHost );
 		/*
@@ -824,7 +1081,6 @@ int main(int argc, char *argv[]) {
 		}
 		*/
 
-		free_position = posi[0];
 		/*
 		if(iter == 10){
 			printf("posicion%i\n", free_position);
