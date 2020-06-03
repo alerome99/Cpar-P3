@@ -237,22 +237,6 @@ __global__ void inicializarDevices(int* array, int* array2, int* array3, int* ar
 	}
 }
 
-__global__ void ajustar(Cell* entrada, Cell* salida, int* numCells)
-{
-	int globalPos = threadIdx.x + blockIdx.x * blockDim.x;
-	if(globalPos<numCells[0]){
-		salida[globalPos] = entrada[globalPos];
-	}
-}
-
-__global__ void ajustar2(Cell* entrada, Cell* salida, int* numCells, int* stepNewCells)
-{
-	int globalPos = threadIdx.x + blockIdx.x * blockDim.x;
-	if(globalPos<numCells[0]+stepNewCells[0]){
-		salida[globalPos] = entrada[globalPos];
-	}
-}
-
 __global__ void iniciarCultureCells(int* array, int size)
 {
 	int globalPos = threadIdx.x + blockIdx.x * blockDim.x;
@@ -851,6 +835,11 @@ int main(int argc, char *argv[]) {
 	int num_cells_alive = num_cells;
 	int iter;
 	int max_food_int = max_food * PRECISION;
+	numeroBloq2 = num_cells/tamanoBloq;
+	if (num_cells%tamanoBloq!=0) 
+    {
+        numeroBloq2++;
+    }
 	numeroCelulas[0] = num_cells;
 	numAlive[0] = num_cells_alive;
 	stats[0].history_total_cells = num_cells;
@@ -1008,11 +997,7 @@ for( iter=0; iter<max_iter && current_max_food <= max_food_int && num_cells_aliv
 		double ttotal3 = cp_Wtime();
 		cudaMemcpy( bandera, numeroCelulasDevice, sizeof(int) * 1 * 1 ,cudaMemcpyDeviceToHost );
 
-		numeroBloq2 = bandera[0]/tamanoBloq;
-		if (bandera[0]%tamanoBloq!=0) 
-    	{
-        	numeroBloq2++;
-    	}
+
 
 		movimientoCelulas<<<numeroBloq2, tamanoBloq, sizeof(int)*tamanoBloq>>>(cellsDevice, rows, columns, numAliveDevice, stepDeadCellsDevice, statsDevice, numeroCelulasDevice, pDevice, p2Device/*, foodShareDevice*/);
 
@@ -1273,7 +1258,7 @@ for( iter=0; iter<max_iter && current_max_food <= max_food_int && num_cells_aliv
 			printf("numero de celulas vivas %i   en la iteracion %i  numero de celulas  %i\n", p, iter, num_cells);
 		}*/
 		limpiarCelulas<<<numeroBloq2, tamanoBloq, sizeof(int)*tamanoBloq>>>(cellsDevice, numeroCelulasDevice, aDevice, cellsDevice2);
-
+		
 		cudaMemcpy( bandera, aDevice, sizeof(int) * 1 * 1 ,cudaMemcpyDeviceToHost );
 
 		numeroBloq2 = bandera[0]/tamanoBloq;
